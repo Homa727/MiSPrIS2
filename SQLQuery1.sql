@@ -1,0 +1,22 @@
+CREATE TABLE Enum(
+	id INT IDENTITY(1,1) PRIMARY KEY,
+	imya NVARCHAR(200) NOT NULL
+);
+
+CREATE TABLE EnumValues(
+	id INT IDENTITY(1,1) PRIMARY KEY,
+	enumID INT NOT NULL,
+	imya NVARCHAR(200) NOT NULL,
+	orderID INT NOT NULL
+);
+
+
+Create table productClassEnum(
+	id INT IDENTITY(1,1) PRIMARY KEY,
+	productClassID INT NOT NULL,
+	enumID INT NOT NULL,
+	CONSTRAINT FK_PCE_Class FOREIGN KEY(productClassID)
+		REFERENCES productClass(id),
+	CONSTRAINT FK_PCE_Enum FOREIGN KEY (enumID)
+		REFERENCES Enum(id)
+);
