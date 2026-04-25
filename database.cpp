@@ -321,13 +321,13 @@ ProductClass Database::mapProductsClass(QSqlQuery &query)
 }
 bool Database::addEnum(const QString &name){
     QSqlQuery query;
-    query.prepare("INSERT INTO Enum(imya)" "VALUES(:name)");
+    query.prepare("INSERT INTO [Enum] (imya)" "VALUES(:name)");
     query.bindValue(":name",name);
     return query.exec();
 }
 bool Database::addEnumValue(const EnumValues &ptr){
     QSqlQuery query;
-    query.prepare("INSERT INTO EnumValues(enumID, imya, orderID)" "VALUES(:enumID, :code, :orderID)");
+    query.prepare("INSERT INTO [EnumValues] (enumID, imya, orderID)" "VALUES(:enumID, :code, :orderID)");
     query.bindValue(":enumID", ptr.enumid);
     query.bindValue(":code",ptr.code);
     query.bindValue(":orderID",ptr.orderIndex);
@@ -335,20 +335,20 @@ bool Database::addEnumValue(const EnumValues &ptr){
 }
 bool Database::changeEnumValueOrder(int id, int newOrderIndex){
     QSqlQuery query;
-    query.prepare("UPDATE EnumValues SET orderID=:newOrderIndex WHERE id=:id");
+    query.prepare("UPDATE [EnumValues] SET orderID=:newOrderIndex WHERE id=:id");
     query.bindValue(":newOrderIndex",newOrderIndex);
     query.bindValue(":id",id);
     return query.exec();
 }
-void Database::deleteEnumValue(int id){
+bool Database::deleteEnumValue(int id){
     QSqlQuery query;
-    query.prepare("DELETE FROM EnumValues WHERE id=:id");
+    query.prepare("DELETE FROM [EnumValues] WHERE id=:id");
     query.bindValue(":id",id);
-    query.exec();
+    return query.exec();
 }
 bool Database::updateEnumValue(int id, QString newcode){
     QSqlQuery query;
-    query.prepare("UPDATE EnumValues SET code=:newcode WHERE id=:id");
+    query.prepare("UPDATE [EnumValues] SET imya=:newcode WHERE id=:id");
     query.bindValue(":newcode",newcode);
     query.bindValue(":id",id);
     return query.exec();
@@ -356,20 +356,24 @@ bool Database::updateEnumValue(int id, QString newcode){
 QVector<Enum> Database::getEnums(){
     QVector<Enum> result;
     QSqlQuery query;
-    query.prepare("SELECT * FROM Enum");
+    query.prepare("SELECT * FROM dbo.[Enum]");
+    query.exec();
     while(query.next()){
         Enum e;
         e.id=query.value("id").toInt();
         e.name=query.value("imya").toString();
+        qDebug() << "Fetched:" << e.id << e.name;
         result.push_back(e);
     }
+    qDebug() << query.lastError();
     return result;
 }
 QVector<EnumValues> Database::getEnumValues(int enumID){
     QVector<EnumValues> result;
     QSqlQuery query;
-    query.prepare("SELECT * FROM EnumValues WHERE enumID=:enumID");
+    query.prepare("SELECT * FROM [EnumValues] WHERE enumID=:enumID");
     query.bindValue(":enumID",enumID);
+    query.exec();
     while(query.next()){
         EnumValues v;
         v.id=query.value("id").toInt();
@@ -383,15 +387,17 @@ QVector<EnumValues> Database::getEnumValues(int enumID){
 QVector<EnumValues> Database::getEnumValueByID(int id){
     QVector<EnumValues> result;
     QSqlQuery query;
-    query.prepare("SELECT * FROM EnumValues WHERE id=:id");
+    query.prepare("SELECT * FROM [EnumValues] WHERE id=:id");
     query.bindValue(":id",id);
+    query.exec();
     while(query.next()){
         EnumValues val;
         val.id=query.value("id").toInt();
         val.enumid=query.value("enumID").toInt();
-        val.code=query.value("code").toString();
-        val.orderIndex=query.value("orderIndex").toInt();
+        val.code=query.value("imya").toString();
+        val.orderIndex=query.value("orderID").toInt();
         result.push_back(val);
     }
+    qDebug() << query.lastError();
     return result;
 }

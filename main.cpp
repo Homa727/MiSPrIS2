@@ -289,7 +289,7 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
         sendJsonResponse(socket, QJsonDocument(arr));
         return;
     }
-    if(req.method == "GET" && req.path == "/api/classes/"){
+    if(req.method == "GET" && req.path == "/api/classes/Enum"){
         QVector<Enum> Enums = g_db->getEnums();
         QJsonArray arr;
         for (const auto &c : Enums) arr.append(EnumToJson(c));
@@ -320,17 +320,19 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
         sendJsonResponse(socket, QJsonDocument(arr));
         return;
     }
-    if(req.method == "POST" && req.path == "/api/classes/"){
+    if(req.method == "POST" && req.path == "/api/classes/Enum"){
         QJsonObject obj;
         QString err;
         if(!parseJsonBody(req.body,obj,err)){
             sendErrorResponse(socket,err);
+            return;
         }
-        QString name=obj["name"];
+        QString name=obj["name"].toString();
         if(g_db->addEnum(name)){
             sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","Enum add"}}));
         }else{
             sendErrorResponse(socket,"Enum don`t add",500);
+            return;
         }
         return;
     }
@@ -339,26 +341,28 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
         QString err;
         if(!parseJsonBody(req.body,obj,err)){
             sendErrorResponse(socket,err);
+            return;
         }
         EnumValues val;
         val.id=obj["id"].toInt();
         val.enumid=obj["enumID"].toInt();
-        val.code=obj["code"];
+        val.code=obj["code"].toString();
         val.orderIndex=obj["orderIndex"].toInt();
         if(g_db->addEnumValue(val)){
             sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","EnumValue add"}}));
         }else{
             sendErrorResponse(socket,"EnumValue don`t add",500);
+            return;
         }
         return;
     }
-    if(req.method == "DELETE" && req.path == "/api/classes/"){
+    if(req.method == "DELETE" && req.path == "/api/classes/Enum"){
         if(!req.queryParams.contains("id")){
             sendErrorResponse(socket, "Missing id parameter");
             return;
         }
         int id = req.queryParams["id"].toInt();
-        if (g_db->deleteProductClass(id))
+        if (g_db->deleteEnumValue(id))
             sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status", "deleted"}}));
         else
             sendErrorResponse(socket, "Delete failed (has children?)", 500);
@@ -369,13 +373,15 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
         QString err;
         if(!parseJsonBody(req.body, obj, err)){
             sendErrorResponse(socket, err);
+            return;
         }
-        QString newcode= obj["name"];
+        QString newcode= obj["name"].toString();
         int id= obj["id"].toInt();
         if(g_db->updateEnumValue(id,newcode)){
             sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status"," Code update"}}));
         }else{
             sendErrorResponse(socket, "Code don`t update", 500);
+            return;
         }
         return;
     }
@@ -388,9 +394,10 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
         int id=obj["id"].toInt();
         int newOrderIndex=obj["orderIndex"].toInt();
         if(g_db->changeEnumValueOrder(id,newOrderIndex)){
-            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","order is change"}});
+            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","order is change"}}));
         }else{
             sendErrorResponse(socket, "order don`t change", 500);
+            return;
         }
         return;
     }
@@ -404,11 +411,8 @@ int main(int argc, char *argv[]) {
 
     g_db = new Database();
     g_db->connectToDatabase();
-    if (!g_db->isOpen()) {
-        qCritical() << "Не удалось подключиться к БД";
-        return -1;
-    }
-    qDebug() << "База данных подключена";
+
+
 
     QTcpServer server;
     if (!server.listen(QHostAddress::Any, 8080)) {

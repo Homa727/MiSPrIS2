@@ -71,7 +71,7 @@ public:
     bool addEnum(const QString &name);
     bool addEnumValue(const EnumValues &ptr);
     bool updateEnumValue(int id, QString newcode);
-    void deleteEnumValue(int id);
+    bool deleteEnumValue(int id);
     bool changeEnumValueOrder(int id,int newOrderIndex);
     QVector<EnumValues> getEnumValues(int enumID);
     QVector<Enum> getEnums();
