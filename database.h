@@ -39,7 +39,27 @@ struct EnumValues{
     QString code;
     int orderIndex;
 };
-
+struct Parametr{
+    int id;
+    QString name;
+    QString type;
+    int enumID;
+    int unitID;
+    double minValue;
+    double maxValue;
+};
+struct ProductparametrClass{
+    int id;
+    int ProductclassID;
+    int parametrID;
+};
+struct ProductParametrValue{
+    int id;
+    int productID;
+    int parameterID;
+    double valueNumber;
+    double EnumValueID;
+};
 
 class Database : public QObject
 {
@@ -68,6 +88,7 @@ public:
 
     bool classCodeExists(const QString &code);
     bool checkCycle( int classID, int newParentID);
+
     bool addEnum(const QString &name);
     bool addEnumValue(const EnumValues &ptr);
     bool updateEnumValue(int id, QString newcode);
@@ -77,10 +98,18 @@ public:
     QVector<Enum> getEnums();
     QVector<EnumValues> getEnumValueByID(int id);
 
-
-    //QVector<Product> getAllProduct();
-    //QVector<Product> getProductsByClass(int classID);
     bool changeOrder(int classID,int newOrderIndex);
+
+    bool addParametr(const Parametr &param);
+    bool addParametrToClass(int classID, int parametrID);
+    QVector<Parametr> getClassParametr(int classID);
+
+    bool setNumberParametrValue(int productID, int parametrID, double value);
+    bool setEnumParametrValue(int productID, int parametrID, double enumValueID);
+    QVector<ProductParametrValue> getProductParametrValue(int productID);
+
+    QVector<Product> findProductByNumberParam(int parametrID, double min, double max);
+    QVector<Product> findProductByEnumParam(int parametrID, int enumValueID);
 private:
     QSqlDatabase database;
 

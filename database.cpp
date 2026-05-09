@@ -401,3 +401,131 @@ QVector<EnumValues> Database::getEnumValueByID(int id){
     qDebug() << query.lastError();
     return result;
 }
+bool Database::addParametr(const Parametr &param){
+    QSqlQuery query;
+    query.prepare("INSERT INTO Parametr (name,type,enumID,unitID,minValue,maxValue) VALUES(:name, :type, :enumID, :unitID, :minValue, :maxValue)");
+    query.bindValue(":name",param.name);
+    query.bindValue(":type",param.type);
+    query.bindValue(":enumID",param.enumID);
+    query.bindValue(":unitID",param.unitID);
+    query.bindValue(":minValue",param.minValue);
+    query.bindValue(":maxValue",param.maxValue);
+    return query.exec();
+}
+bool Database::addParametrToClass(int classID, int parametrID){
+    QSqlQuery query;
+    query.prepare("INSERT INTO ProductclassParametr (ProductclassID,parametrID) VALUES(:classID, :parametrID)");
+    query.bindValue(":classID",classID);
+    query.bindValue(":parametrID",parametrID);
+    return query.exec();
+}
+QVector<Parametr> Database::getClassParametr(int classID){
+    QVector<Parametr> result;
+    QSqlQuery query;
+    query.prepare("SELECT p.* FROM parametr p JOIN ProductclassParametr pc ON p.id = pc.parametrID WHERE pc.ProductclassID = :classID ");
+    query.bindValue(":classID",classID);
+    query.exec();
+    while(query.next()){
+        Parametr par;
+        par.id=query.value("id").toInt();
+        par.name=query.value("name").toString();
+        par.type=query.value("type").toString();
+        par.enumID=query.value("enumID").toInt();
+        par.unitID=query.value("unitID").toInt();
+        par.minValue=query.value("minValue").toInt();
+        par.maxValue=query.value("maxValue").toInt();
+        result.push_back(par);
+    }
+    return result;
+}
+bool Database::setNumberParametrValue(int productID, int parametrID, double value){
+    QSqlQuery query;
+    query.prepare("UPDATE ProductParameterValue SET valueNumber=:value WHERE productID=:productID AND parameterID=:parametrID");
+    query.bindValue(":productID",productID);
+    query.bindValue(":parametrID",parametrID);
+    query.bindValue(":value",value);
+    return query.exec();
+}
+bool Database::setEnumParametrValue(int productID, int parametrID, double enumValueID){
+    QSqlQuery query;
+    query.prepare("UPDATE ProductParameterValue SET valueEnumID=:enumValueID WHERE productID=:productID AND parameterID=:parametrID");
+    query.bindValue(":productID",productID);
+    query.bindValue(":parametrID",parametrID);
+    query.bindValue(":enumValueID",enumValueID);
+    return query.exec();
+}
+QVector<ProductParametrValue> Database::getProductParametrValue(int productID){
+    QVector<ProductParametrValue> result;
+    QSqlQuery query;
+    query.prepare("SELECT* FROM ProductParameterValue WHERE productID=:productID");
+    query.bindValue(":productID",productID);
+    query.exec();
+    while(query.next()){
+        ProductParametrValue pro;
+        pro.id=query.value("id").toInt();
+        pro.productID=query.value("productID").toInt();
+        pro.parameterID=query.value("parameterID").toInt();
+        pro.valueNumber=query.value("valueNumber").toDouble();
+        pro.EnumValueID=query.value("valueEnumID").toInt();
+        result.push_back(pro);
+    }
+    return result;
+}
+QVector<Product> Database::findProductByNumberParam(int parameterID, double min, double max)
+{
+    QVector<Product> result;
+    QSqlQuery query;
+
+    query.prepare(
+        "SELECT t.* "
+        "FROM tovar t "
+        "JOIN ProductParameterValue ppv ON t.id = ppv.productID "
+        "WHERE ppv.parameterID = :paramID "
+        "AND ppv.valueNumber BETWEEN :min AND :max"
+        );
+
+    query.bindValue(":paramID", parameterID);
+    query.bindValue(":min", min);
+    query.bindValue(":max", max);
+    query.exec();
+    while(query.next()){
+        Product p;
+        p.id=query.value("id").toInt();
+        p.name=query.value("imya").toString();
+        p.articleNumber=query.value("articleNumber").toString();
+        p.price=query.value("price").toDouble();
+        p.manufacturer=query.value("manufacture").toString();
+        p.productclassID=query.value("productClassID").toInt();
+        result.push_back(p);
+    }
+
+    return result;
+}
+QVector<Product> Database::findProductByEnumParam(int parameterID, int enumValueID)
+{
+    QVector<Product> result;
+    QSqlQuery query;
+
+    query.prepare(
+        "SELECT t.* "
+        "FROM tovar t "
+        "JOIN ProductParameterValue ppv ON t.id = ppv.productID "
+        "WHERE ppv.parameterID = :paramID "
+        "AND ppv.valueEnumID = :enumID"
+        );
+
+    query.bindValue(":paramID", parameterID);
+    query.bindValue(":enumID", enumValueID);
+    query.exec();
+    while(query.next()){
+        Product pe;
+        pe.id=query.value("id").toInt();
+        pe.name=query.value("imya").toString();
+        pe.articleNumber=query.value("articleNumber").toString();
+        pe.price=query.value("price").toDouble();
+        pe.manufacturer=query.value("manufacture").toString();
+        pe.productclassID=query.value("productClassID").toInt();
+        result.push_back(pe);
+    }
+    return result;
+}

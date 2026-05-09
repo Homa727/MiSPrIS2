@@ -47,7 +47,44 @@ QJsonObject EnumValuesToJson( const EnumValues &val){
     obj["orderIndex"]=val.orderIndex;
     return obj;
 }
+QJsonObject ProductclassParametrToJson(const ProductparametrClass &par){
+    QJsonObject obj;
+    obj["id"]=par.id;
+    obj["ProductclassID"]=par.ProductclassID;
+    obj["parametrID"]=par.parametrID;
+    return obj;
+}
+QJsonObject ProductParameterValueToJson(const ProductParametrValue &par){
+    QJsonObject obj;
+    obj["id"]=par.id;
+    obj["productID"]=par.productID;
+    obj["parameterID"]=par.parameterID;
+    obj["valueNumber"]=par.valueNumber;
+    obj["valueEnumID"]=par.EnumValueID;
+    return obj;
+}
+QJsonObject ParametrToJson(const Parametr &par){
+    QJsonObject obj;
+    obj["id"]=par.id;
+    obj["name"]=par.name;
+    obj["type"]=par.type;
+    obj["enumID"]=par.enumID;
+    obj["unitID"]=par.unitID;
+    obj["minValue"]=par.minValue;
+    obj["maxValue"]=par.maxValue;
+    return obj;
+}
+QJsonObject TovarToJson(const Product &pro){
 
+    QJsonObject obj;
+    obj["id"]=pro.id;
+    obj["name"]=pro.name;
+    obj["articleNumber"]=pro.articleNumber;
+    obj["price"]=pro.price;
+    obj["manufacturer"]=pro.manufacturer;
+    obj["productclassID"]=pro.productclassID;
+    return obj;
+}
 void sendHttpResponse(QTcpSocket *socket, int statusCode, const QString &statusText,
                       const QString &contentType, const QByteArray &body) {
     QString response = QString("HTTP/1.1 %1 %2\r\n"
@@ -401,6 +438,133 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
         }
         return;
     }
+    if(req.method=="GET" && req.path == "/api/classes/param"){
+        if(!req.queryParams.contains("classId")){
+            sendErrorResponse(socket, "Missing classID parameter");
+            return;
+        }
+        int classID=req.queryParams["classId"].toInt();
+        QJsonArray arr;
+        QVector<Parametr> par = g_db->getClassParametr(classID);
+        for(const auto &c: par) arr.append(ParametrToJson(c));
+        sendJsonResponse(socket, QJsonDocument(arr));
+        return;
+    }
+    if(req.method=="GET" && req.path == "/api/classes/paramval"){
+        if(!req.queryParams.contains("productId")){
+            sendErrorResponse(socket, "Missing productId parameter");
+            return;
+        }
+        int productId=req.queryParams["productId"].toInt();
+        QJsonArray arr;
+        QVector<ProductParametrValue> par = g_db->getProductParametrValue(productId);
+        for(const auto &c: par) arr.append(ProductParameterValueToJson(c));
+        sendJsonResponse(socket, QJsonDocument(arr));
+        return;
+    }
+    if(req.method=="POST" && req.path == "/api/classes/param"){
+        QJsonObject obj;
+        QString err;
+        if(!parseJsonBody(req.body,obj,err)){
+            sendErrorResponse(socket,err);
+            return;
+        }
+        Parametr par;
+        par.id=obj["id"].toInt();
+        par.name=obj["name"].toString();
+        par.type=obj["type"].toString();
+        par.enumID=obj["enumID"].toInt();
+        par.unitID=obj["unitID"].toInt();
+        par.minValue=obj["minValue"].toDouble();
+        par.maxValue=obj["maxValue"].toDouble();
+        if(g_db->addParametr(par)){
+            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","Parametr add"}}));
+        }else{
+            sendErrorResponse(socket,"Parametr don`t add",500);
+            return;
+        }
+        return;
+    }
+    if(req.method=="POST" && req.path == "/api/classes/paramclass"){
+        QJsonObject obj;
+        QString err;
+        if(!parseJsonBody(req.body,obj,err)){
+            sendErrorResponse(socket,err);
+            return;
+        }
+        int ProductclassID=obj["ProductclassID"].toInt();
+        int parametrID=obj["parametrID"].toInt();
+        if(g_db->addParametrToClass(ProductclassID,parametrID)){
+            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","ParametrClass add"}}));
+        }else{
+            sendErrorResponse(socket,"ParametrClass don`t add",500);
+            return;
+        }
+        return;
+    }
+    if(req.method=="PUT" && req.path == "/api/classes/numberpar"){
+        QJsonObject obj;
+        QString err;
+        if(!parseJsonBody(req.body, obj, err)){
+            sendErrorResponse(socket,err);
+        }
+        int productID=obj["productID"].toInt();
+        int parametrID=obj["parametrID"].toInt();
+        int value=obj["value"].toInt();
+        if(g_db->setNumberParametrValue(productID,parametrID,value)){
+            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","number value set"}}));
+        }else{
+            sendErrorResponse(socket, "number value don`t set", 500);
+            return;
+        }
+        return;
+    }
+    if(req.method=="PUT" && req.path == "/api/classes/enumpar"){
+        QJsonObject obj;
+        QString err;
+        if(!parseJsonBody(req.body, obj, err)){
+            sendErrorResponse(socket,err);
+        }
+        int productID=obj["productID"].toInt();
+        int parametrID=obj["parametrID"].toInt();
+        int enumvalueID=obj["enumvalueID"].toInt();
+        if(g_db->setEnumParametrValue(productID,parametrID,enumvalueID)){
+            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","enum value set"}}));
+        }else{
+            sendErrorResponse(socket, "enum value don`t set", 500);
+            return;
+        }
+        return;
+    }
+    if(req.method=="GET" && req.path == "/api/classes/findnum"){
+        if(!req.queryParams.contains("parameterID")){
+            sendErrorResponse(socket, "Missing parameters for search");
+            return;
+        }
+        int parameterID=req.queryParams["parameterID"].toInt();
+        double min=req.queryParams["minValue"].toDouble();
+        double max=req.queryParams["maxValue"].toDouble();
+        QJsonArray arr;
+        QVector<Product> par = g_db->findProductByNumberParam(parameterID,min,max);
+        for(const auto &c: par) arr.append(TovarToJson(c));
+        sendJsonResponse(socket, QJsonDocument(arr));
+        return;
+    }
+    if(req.method=="GET" && req.path == "/api/classes/findenum"){
+        if(!req.queryParams.contains("parameterID")){
+            sendErrorResponse(socket, "Missing parameters for search");
+            return;
+        }
+        int parameterID=req.queryParams["parameterID"].toInt();
+        int enumValueID=req.queryParams["enumValueID"].toInt();
+        QJsonArray arr;
+        QVector<Product> par = g_db->findProductByEnumParam(parameterID,enumValueID);
+        for(const auto &c: par) arr.append(TovarToJson(c));
+        sendJsonResponse(socket, QJsonDocument(arr));
+        return;
+    }
+
+
 
     sendErrorResponse(socket, "Not found", 404);
 }
