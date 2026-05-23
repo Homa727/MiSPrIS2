@@ -10,6 +10,8 @@
 #include <QDebug>
 #include <QUrlQuery>
 #include <QMap>
+#include <QFile>
+#include <QMimeDatabase>
 #include "database.h"
 
 Database *g_db = nullptr;
@@ -33,12 +35,14 @@ QJsonObject unitToJson(const Unit &u) {
     obj["shortName"] = u.shortname;
     return obj;
 }
+
 QJsonObject EnumToJson(const Enum &E){
     QJsonObject obj;
     obj["id"]=E.id;
     obj["name"]=E.name;
     return obj;
 }
+
 QJsonObject EnumValuesToJson( const EnumValues &val){
     QJsonObject obj;
     obj["id"]=val.id;
@@ -47,6 +51,7 @@ QJsonObject EnumValuesToJson( const EnumValues &val){
     obj["orderIndex"]=val.orderIndex;
     return obj;
 }
+
 QJsonObject ProductclassParametrToJson(const ProductparametrClass &par){
     QJsonObject obj;
     obj["id"]=par.id;
@@ -54,6 +59,7 @@ QJsonObject ProductclassParametrToJson(const ProductparametrClass &par){
     obj["parametrID"]=par.parametrID;
     return obj;
 }
+
 QJsonObject ProductParameterValueToJson(const ProductParametrValue &par){
     QJsonObject obj;
     obj["id"]=par.id;
@@ -63,6 +69,7 @@ QJsonObject ProductParameterValueToJson(const ProductParametrValue &par){
     obj["valueEnumID"]=par.EnumValueID;
     return obj;
 }
+
 QJsonObject ParametrToJson(const Parametr &par){
     QJsonObject obj;
     obj["id"]=par.id;
@@ -74,8 +81,8 @@ QJsonObject ParametrToJson(const Parametr &par){
     obj["maxValue"]=par.maxValue;
     return obj;
 }
-QJsonObject TovarToJson(const Product &pro){
 
+QJsonObject TovarToJson(const Product &pro){
     QJsonObject obj;
     obj["id"]=pro.id;
     obj["name"]=pro.name;
@@ -85,11 +92,63 @@ QJsonObject TovarToJson(const Product &pro){
     obj["productclassID"]=pro.productclassID;
     return obj;
 }
+QJsonObject OperationClassToJson(const OperationClass &op){
+    QJsonObject obj;
+    obj["id"]=op.id;
+    obj["name"]=op.name;
+    obj["description"]=op.description;
+    return obj;
+}
+QJsonObject OperationTemplateToJson(const OperationTemplate &tem){
+    QJsonObject obj;
+    obj["id"]=tem.id;
+    obj["name"]=tem.name;
+    obj["classID"]=tem.classID;
+    obj["description"]=tem.description;
+    return obj;
+}
+QJsonObject OperationToJson(const Operation &op){
+    QJsonObject obj;
+    obj["id"]=op.id;
+    obj["templateID"]=op.templateID;
+    obj["operationDate"]=op.operationDate;
+    obj["status"]=op.status;
+    return obj;
+}
+QJsonObject OperationRoleToJson(const OperationRole &rol){
+    QJsonObject obj;
+    obj["id"]=rol.id;
+    obj["operationID"]=rol.operationID;
+    obj["participantName"]=rol.participantName;
+    obj["roleName"]=rol.roleName;
+    return obj;
+}
+QJsonObject OperationDocumentToJson(const OperationDocument &doc){
+    QJsonObject obj;
+    obj["id"]=doc.id;
+    obj["operationID"]=doc.operationID;
+    obj["documentType"]=doc.documentType;
+    obj["documentNumber"]=doc.documentNumber;
+    obj["documentDate"]=doc.documentDate;
+    return obj;
+}
+QJsonObject OperationParameterValueToJson(const OperationParameterValue &par){
+    QJsonObject obj;
+    obj["id"]=par.id;
+    obj["numberValue"]=par.numberValue;
+    obj["operationID"]=par.operationID;
+    obj["parameterID"]=par.parameterID;
+    obj["enumValueID"]=par.enumValueID;
+    obj["stringValue"]=par.stringValue;
+    return obj;
+}
+
 void sendHttpResponse(QTcpSocket *socket, int statusCode, const QString &statusText,
                       const QString &contentType, const QByteArray &body) {
     QString response = QString("HTTP/1.1 %1 %2\r\n"
                                "Content-Type: %3\r\n"
                                "Content-Length: %4\r\n"
+                               "Access-Control-Allow-Origin: *\r\n"
                                "Connection: close\r\n"
                                "\r\n")
                            .arg(statusCode)
@@ -110,6 +169,18 @@ void sendErrorResponse(QTcpSocket *socket, const QString &message, int status = 
     QJsonObject obj;
     obj["error"] = message;
     sendJsonResponse(socket, QJsonDocument(obj), status);
+}
+
+void sendFileResponse(QTcpSocket *socket, const QString &filePath) {
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        sendErrorResponse(socket, "File not found", 404);
+        return;
+    }
+    QByteArray content = file.readAll();
+    QMimeDatabase mimeDb;
+    QString mimeType = mimeDb.mimeTypeForFile(filePath).name();
+    sendHttpResponse(socket, 200, "OK", mimeType, content);
 }
 
 struct HttpRequest {
@@ -144,7 +215,6 @@ HttpRequest parseHttpRequest(const QByteArray &data) {
     return req;
 }
 
-
 bool parseJsonBody(const QByteArray &body, QJsonObject &obj, QString &errorMsg) {
     QJsonParseError err;
     QJsonDocument doc = QJsonDocument::fromJson(body, &err);
@@ -161,7 +231,21 @@ bool parseJsonBody(const QByteArray &body, QJsonObject &obj, QString &errorMsg) 
 }
 
 void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
+    // Раздача статики веб-интерфейса (если нужен)
+    if (req.method == "GET" && (req.path == "/" || req.path == "/index.html")) {
+        sendFileResponse(socket, "web/index.html");
+        return;
+    }
+    if (req.method == "GET" && req.path == "/style.css") {
+        sendFileResponse(socket, "web/style.css");
+        return;
+    }
+    if (req.method == "GET" && req.path == "/script.js") {
+        sendFileResponse(socket, "web/script.js");
+        return;
+    }
 
+    // === Классы товаров ===
     if (req.method == "GET" && req.path == "/api/classes") {
         QVector<ProductClass> classes = g_db->getAllProductClasses();
         QJsonArray arr;
@@ -169,8 +253,6 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
         sendJsonResponse(socket, QJsonDocument(arr));
         return;
     }
-
-
     if (req.method == "POST" && req.path == "/api/classes") {
         QJsonObject obj;
         QString errMsg;
@@ -185,15 +267,12 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
         cls.baseUnitID = obj["baseUnitID"].toInt();
         cls.parentID = obj["parentID"].toInt();
         cls.orderindex = obj["orderIndex"].toInt();
-
         if (g_db->AddProductClass(cls))
             sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status", "ok"}}));
         else
             sendErrorResponse(socket, "Failed to add class (code exists or parent terminal)", 500);
         return;
     }
-
-
     if (req.method == "PUT" && req.path == "/api/classes/move") {
         QJsonObject obj;
         QString errMsg;
@@ -209,8 +288,6 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
             sendErrorResponse(socket, "Move failed", 500);
         return;
     }
-
-
     if (req.method == "PUT" && req.path == "/api/classes/order") {
         QJsonObject obj;
         QString errMsg;
@@ -226,7 +303,6 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
             sendErrorResponse(socket, "Change order failed", 500);
         return;
     }
-
     if (req.method == "DELETE" && req.path == "/api/classes") {
         if (!req.queryParams.contains("id")) {
             sendErrorResponse(socket, "Missing id parameter");
@@ -239,8 +315,6 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
             sendErrorResponse(socket, "Delete failed (has children?)", 500);
         return;
     }
-
-
     if (req.method == "PUT" && req.path == "/api/classes/baseunit") {
         QJsonObject obj;
         QString errMsg;
@@ -256,7 +330,6 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
             sendErrorResponse(socket, "Set base unit failed", 500);
         return;
     }
-
     if (req.method == "GET" && req.path == "/api/classes/checkcode") {
         if (!req.queryParams.contains("code")) {
             sendErrorResponse(socket, "Missing code parameter");
@@ -269,8 +342,6 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
         sendJsonResponse(socket, QJsonDocument(resp));
         return;
     }
-
-
     if (req.method == "GET" && req.path == "/api/classes/checkcycle") {
         if (!req.queryParams.contains("classID") || !req.queryParams.contains("parentID")) {
             sendErrorResponse(socket, "Missing classID or parentID");
@@ -284,8 +355,6 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
         sendJsonResponse(socket, QJsonDocument(resp));
         return;
     }
-
-
     if (req.method == "GET" && req.path == "/api/classes/child") {
         if (!req.queryParams.contains("id")) {
             sendErrorResponse(socket, "Missing id parameter");
@@ -298,8 +367,6 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
         sendJsonResponse(socket, QJsonDocument(arr));
         return;
     }
-
-
     if (req.method == "GET" && req.path == "/api/classes/parent") {
         if (!req.queryParams.contains("id")) {
             sendErrorResponse(socket, "Missing id parameter");
@@ -312,8 +379,6 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
         sendJsonResponse(socket, QJsonDocument(arr));
         return;
     }
-
-
     if (req.method == "GET" && req.path == "/api/classes/terminal") {
         if (!req.queryParams.contains("id")) {
             sendErrorResponse(socket, "Missing id parameter");
@@ -326,6 +391,8 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
         sendJsonResponse(socket, QJsonDocument(arr));
         return;
     }
+
+    // === Перечисления ===
     if(req.method == "GET" && req.path == "/api/classes/Enum"){
         QVector<Enum> Enums = g_db->getEnums();
         QJsonArray arr;
@@ -369,7 +436,6 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
             sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","Enum add"}}));
         }else{
             sendErrorResponse(socket,"Enum don`t add",500);
-            return;
         }
         return;
     }
@@ -389,7 +455,6 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
             sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","EnumValue add"}}));
         }else{
             sendErrorResponse(socket,"EnumValue don`t add",500);
-            return;
         }
         return;
     }
@@ -418,7 +483,6 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
             sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status"," Code update"}}));
         }else{
             sendErrorResponse(socket, "Code don`t update", 500);
-            return;
         }
         return;
     }
@@ -427,6 +491,7 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
         QString err;
         if(!parseJsonBody(req.body, obj, err)){
             sendErrorResponse(socket,err);
+            return;
         }
         int id=obj["id"].toInt();
         int newOrderIndex=obj["orderIndex"].toInt();
@@ -434,10 +499,11 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
             sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","order is change"}}));
         }else{
             sendErrorResponse(socket, "order don`t change", 500);
-            return;
         }
         return;
     }
+
+    // === Параметры ===
     if(req.method=="GET" && req.path == "/api/classes/param"){
         if(!req.queryParams.contains("classId")){
             sendErrorResponse(socket, "Missing classID parameter");
@@ -481,7 +547,6 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
             sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","Parametr add"}}));
         }else{
             sendErrorResponse(socket,"Parametr don`t add",500);
-            return;
         }
         return;
     }
@@ -498,7 +563,6 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
             sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","ParametrClass add"}}));
         }else{
             sendErrorResponse(socket,"ParametrClass don`t add",500);
-            return;
         }
         return;
     }
@@ -507,6 +571,7 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
         QString err;
         if(!parseJsonBody(req.body, obj, err)){
             sendErrorResponse(socket,err);
+            return;
         }
         int productID=obj["productID"].toInt();
         int parametrID=obj["parametrID"].toInt();
@@ -515,7 +580,6 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
             sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","number value set"}}));
         }else{
             sendErrorResponse(socket, "number value don`t set", 500);
-            return;
         }
         return;
     }
@@ -532,74 +596,322 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
             sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","enum value set"}}));
         }else{
             sendErrorResponse(socket, "enum value don`t set", 500);
-            return;
         }
         return;
     }
+
+    // === Поиск (старые эндпоинты, совместимость) ===
     if(req.method=="GET" && req.path == "/api/classes/findnum"){
-        if(!req.queryParams.contains("parameterID")){
+        if(!req.queryParams.contains("parameterID") || !req.queryParams.contains("minValue") || !req.queryParams.contains("maxValue")){
             sendErrorResponse(socket, "Missing parameters for search");
             return;
         }
         int parameterID=req.queryParams["parameterID"].toInt();
         double min=req.queryParams["minValue"].toDouble();
         double max=req.queryParams["maxValue"].toDouble();
+        int classId = req.queryParams.value("classId", "0").toInt();
         QJsonArray arr;
-        QVector<Product> par = g_db->findProductByNumberParam(parameterID,min,max);
+        QVector<Product> par = g_db->findProductByNumberParam(parameterID, min, max, classId);
         for(const auto &c: par) arr.append(TovarToJson(c));
         sendJsonResponse(socket, QJsonDocument(arr));
         return;
     }
     if(req.method=="GET" && req.path == "/api/classes/findenum"){
-        if(!req.queryParams.contains("parameterID")){
+        if(!req.queryParams.contains("parameterID") || !req.queryParams.contains("enumValueID")){
             sendErrorResponse(socket, "Missing parameters for search");
             return;
         }
         int parameterID=req.queryParams["parameterID"].toInt();
         int enumValueID=req.queryParams["enumValueID"].toInt();
+        int classId = req.queryParams.value("classId", "0").toInt();
         QJsonArray arr;
-        QVector<Product> par = g_db->findProductByEnumParam(parameterID,enumValueID);
+        QVector<Product> par = g_db->findProductByEnumParam(parameterID, enumValueID, classId);
         for(const auto &c: par) arr.append(TovarToJson(c));
         sendJsonResponse(socket, QJsonDocument(arr));
         return;
     }
+    if(req.method=="GET" && req.path == "/api/classes/findbyprice"){
+        if(!req.queryParams.contains("minPrice") || !req.queryParams.contains("maxPrice")){
+            sendErrorResponse(socket, "Missing minPrice or maxPrice");
+            return;
+        }
+        double min = req.queryParams["minPrice"].toDouble();
+        double max = req.queryParams["maxPrice"].toDouble();
+        int classId = req.queryParams.value("classId", "0").toInt();
+        QVector<Product> products = g_db->findProductByPrice(min, max, classId);
+        QJsonArray arr;
+        for (const auto &p : products) arr.append(TovarToJson(p));
+        sendJsonResponse(socket, QJsonDocument(arr));
+        return;
+    }
 
+    // === Новый многопараметрический поиск ===
+    if (req.method == "POST" && req.path == "/api/classes/multisearch") {
+        QJsonObject body;
+        QString err;
+        if (!parseJsonBody(req.body, body, err)) {
+            sendErrorResponse(socket, err);
+            return;
+        }
+        int classId = body["classId"].toInt();
+        QJsonArray conditions = body["conditions"].toArray();
+        if (classId == 0 || conditions.isEmpty()) {
+            sendErrorResponse(socket, "Invalid request: classId and conditions required");
+            return;
+        }
+        QVector<Product> products = g_db->multiSearch(classId, conditions);
+        QJsonArray arr;
+        for (const auto &p : products) arr.append(TovarToJson(p));
+        sendJsonResponse(socket, QJsonDocument(arr));
+        return;
+    }
 
-
+    // === Единицы измерения ===
+    if (req.method == "GET" && req.path == "/api/units") {
+        QVector<Unit> units = g_db->getAllUnits();
+        QJsonArray arr;
+        for (const auto &u : units) {
+            QJsonObject obj;
+            obj["id"] = u.id;
+            obj["name"] = u.name;
+            obj["shortName"] = u.shortname;
+            arr.append(obj);
+        }
+        sendJsonResponse(socket, QJsonDocument(arr));
+        return;
+    }
+    if (req.method == "POST" && req.path == "/api/units") {
+        QJsonObject obj;
+        QString errMsg;
+        if (!parseJsonBody(req.body, obj, errMsg)) {
+            sendErrorResponse(socket, errMsg);
+            return;
+        }
+        QString name = obj["name"].toString();
+        QString shortName = obj["shortName"].toString();
+        if (name.isEmpty() || shortName.isEmpty()) {
+            sendErrorResponse(socket, "Name and shortName required");
+            return;
+        }
+        g_db->addUnit(name, shortName);
+        sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status", "ok"}}));
+        return;
+    }
+    if (req.method == "DELETE" && req.path == "/api/units") {
+        if (!req.queryParams.contains("id")) {
+            sendErrorResponse(socket, "Missing id parameter");
+            return;
+        }
+        int id = req.queryParams["id"].toInt();
+        g_db->deleteUnit(id);
+        sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status", "deleted"}}));
+        return;
+    }
+    if (req.method == "POST" && req.path == "/api/classes/multisearch") {
+        QJsonObject body;
+        QString err;
+        if (!parseJsonBody(req.body, body, err)) {
+            sendErrorResponse(socket, err);
+            return;
+        }
+        int classId = body["classId"].toInt();
+        QJsonArray conditions = body["conditions"].toArray();
+        if (classId == 0) {
+            sendErrorResponse(socket, "classId required");
+            return;
+        }
+        QVector<Product> products = g_db->multiSearch(classId, conditions);
+        QJsonArray arr;
+        for (const auto &p : products) arr.append(TovarToJson(p));
+        sendJsonResponse(socket, QJsonDocument(arr));
+        return;
+    }
+    if(req.method=="GET" && req.path=="/api/classes/OperationClasses"){
+        QVector<OperationClass> operationClass = g_db->getOperationClasses();
+        QJsonArray arr;
+        for(const auto &c: operationClass) arr.append(OperationClassToJson(c));
+        sendJsonResponse(socket, QJsonDocument(arr));
+        return;
+    }
+    if(req.method=="GET" && req.path=="/api/classes/OperationTemplates"){
+        int classID=req.queryParams["classID"].toInt();
+        QVector<OperationTemplate> OperationTemplates = g_db->getOperationTemplates(classID);
+        QJsonArray arr;
+        for(const auto &c: OperationTemplates) arr.append(OperationTemplateToJson(c));
+        sendJsonResponse(socket, QJsonDocument(arr));
+        return;
+    }
+    if(req.method=="GET" && req.path=="/api/classes/Operations"){
+        QVector<Operation> Operations = g_db->getOperations();
+        QJsonArray arr;
+        for(const auto &c: Operations) arr.append(OperationToJson(c));
+        sendJsonResponse(socket, QJsonDocument(arr));
+        return;
+    }
+    if(req.method=="GET" && req.path=="/api/classes/OperationRoles"){
+        int operationID=req.queryParams["operationID"].toInt();
+        QVector<OperationRole> OperationRoles = g_db->getOperationRoles(operationID);
+        QJsonArray arr;
+        for(const auto &c: OperationRoles) arr.append(OperationRoleToJson(c));
+        sendJsonResponse(socket, QJsonDocument(arr));
+        return;
+    }
+    if(req.method=="GET" && req.path=="/api/classes/OperationDocuments"){
+        int operationID=req.queryParams["operationID"].toInt();
+        QVector<OperationDocument> OperationDocuments = g_db->getOperationDocuments(operationID);
+        QJsonArray arr;
+        for(const auto &c: OperationDocuments) arr.append(OperationDocumentToJson(c));
+        sendJsonResponse(socket, QJsonDocument(arr));
+        return;
+    }
+    if(req.method=="GET" && req.path=="/api/classes/OperationParameters"){
+        int operationID=req.queryParams["operationID"].toInt();
+        QVector<OperationParameterValue> OperationParameters = g_db->getOperationParameters(operationID);
+        QJsonArray arr;
+        for(const auto &c: OperationParameters) arr.append(OperationParameterValueToJson(c));
+        sendJsonResponse(socket, QJsonDocument(arr));
+        return;
+    }
+    if(req.method=="PUT" && req.path=="/api/classes/OperationEnumParam"){
+        QJsonObject obj;
+        QString errMsg;
+        if (!parseJsonBody(req.body, obj, errMsg)) {
+            sendErrorResponse(socket, errMsg);
+            return;
+        }
+        int productID=obj["productID"].toInt();
+        int parametrID = obj["parametrID"].toInt();
+        int enumValueID = obj["enumValueID"].toInt();
+        if (g_db->setEnumParametrValue(productID,parametrID,enumValueID))
+            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status", "base unit set"}}));
+        else
+            sendErrorResponse(socket, "Set base unit failed", 500);
+        return;
+    }
+    if(req.method=="PUT" && req.path=="/api/classes/OperationNumberParam"){
+        QJsonObject obj;
+        QString errMsg;
+        if (!parseJsonBody(req.body, obj, errMsg)) {
+            sendErrorResponse(socket, errMsg);
+            return;
+        }
+        int operationID = obj["operationID"].toInt();
+        int parameterID = obj["parameterID"].toInt();
+        double value = obj["numberValue"].toDouble();
+        if (g_db->setOperationNumberParam(operationID, parameterID, value))
+            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status", "base unit set"}}));
+        else
+            sendErrorResponse(socket, "Set base unit failed", 500);
+        return;
+    }
+    if(req.method=="POST" && req.path=="/api/classes/OperationClass"){
+        QJsonObject obj;
+        QString err;
+        if(!parseJsonBody(req.body,obj,err)){
+            sendErrorResponse(socket,err);
+            return;
+        }
+        OperationClass operc;
+        operc.id=obj["id"].toInt();
+        operc.name=obj["name"].toString();
+        operc.description=obj["description"].toString();
+        if(g_db->addOperationClass(operc)){
+            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","Operation class add"}}));
+        }else{
+            sendErrorResponse(socket,"peration class don`t add",500);
+        }
+        return;
+    }
+    if(req.method=="POST" && req.path=="/api/classes/OperationDocument"){
+        QJsonObject obj;
+        QString err;
+        if(!parseJsonBody(req.body,obj,err)){
+            sendErrorResponse(socket,err);
+            return;
+        }
+        OperationDocument doc;
+        doc.id=obj["id"].toInt();
+        doc.operationID=obj["operationID"].toInt();
+        doc.documentType=obj["documentType"].toString();
+        doc.documentNumber=obj["documentNumber"].toString();
+        doc.documentDate=obj["documentDate"].toString();
+        if(g_db->addOperationDocument(doc)){
+            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","Document add"}}));
+        }else{
+            sendErrorResponse(socket,"Document don`t add",500);
+        }
+        return;
+    }
+    if(req.method=="POST" && req.path=="/api/classes/OperationRole"){
+        QJsonObject obj;
+        QString err;
+        if(!parseJsonBody(req.body,obj,err)){
+            sendErrorResponse(socket,err);
+            return;
+        }
+        OperationRole rol;
+        rol.id=obj["id"].toInt();
+        rol.operationID=obj["operationID"].toInt();
+        rol.participantName=obj["participantName"].toString();
+        rol.roleName=obj["roleName"].toString();
+        if(g_db->addOperationRole(rol)){
+            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","Role add"}}));
+        }else{
+            sendErrorResponse(socket,"Role don`t add",500);
+        }
+        return;
+    }
+    if(req.method=="POST" && req.path=="/api/classes/OperationTemplate"){
+        QJsonObject obj;
+        QString err;
+        if(!parseJsonBody(req.body,obj,err)){
+            sendErrorResponse(socket,err);
+            return;
+        }
+        OperationTemplate tem;
+        tem.id=obj["id"].toInt();
+        tem.classID=obj["classID"].toInt();
+        tem.name=obj["name"].toString();
+        tem.description=obj["description"].toString();
+        if(g_db->addOperationTemplate(tem)){
+            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","Template add"}}));
+        }else{
+            sendErrorResponse(socket,"Template don`t add",500);
+        }
+        return;
+    }
+    if(req.method=="POST" && req.path=="/api/classes/createOperation"){
+        QJsonObject obj;
+        QString err;
+        if(!parseJsonBody(req.body,obj,err)){
+            sendErrorResponse(socket,err);
+            return;
+        }
+        Operation op;
+        op.id=obj["id"].toInt();
+        op.operationDate=obj["operationDate"].toString();
+        op.status=obj["status"].toString();
+        op.templateID=obj["templateID"].toInt();
+        if(g_db->createOperation(op)){
+            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","Operation add"}}));
+        }else{
+            sendErrorResponse(socket,"Operation don`t add",500);
+        }
+        return;
+    }
     sendErrorResponse(socket, "Not found", 404);
 }
 
-
 int main(int argc, char *argv[]) {
     QCoreApplication a(argc, argv);
-
     g_db = new Database();
     g_db->connectToDatabase();
-
-
-
     QTcpServer server;
     if (!server.listen(QHostAddress::Any, 8080)) {
         qCritical() << "Не удалось запустить сервер на порту 8080";
         return -1;
     }
     qDebug() << "Сервер запущен на порту 8080";
-    qDebug() << "Доступные эндпоинты:";
-    qDebug() << "  GET    /api/classes";
-    qDebug() << "  POST   /api/classes";
-    qDebug() << "  PUT    /api/classes/move";
-    qDebug() << "  PUT    /api/classes/order";
-    qDebug() << "  DELETE /api/classes?id=...";
-    qDebug() << "  PUT    /api/classes/baseunit";
-    qDebug() << "  GET    /api/classes/checkcode?code=...";
-    qDebug() << "  GET    /api/classes/checkcycle?classID=...&parentID=...";
-    qDebug() << "  GET    /api/classes/child?id=...";
-    qDebug() << "  GET    /api/classes/parent?id=...";
-    qDebug() << "  GET    /api/classes/terminal?id=...";
-    qDebug() << "  GET    /api/units";
-    qDebug() << "  POST   /api/units";
-    qDebug() << "  DELETE /api/units?id=...";
-
     QObject::connect(&server, &QTcpServer::newConnection, [&]() {
         QTcpSocket *socket = server.nextPendingConnection();
         QObject::connect(socket, &QTcpSocket::readyRead, [socket]() {
@@ -609,6 +921,5 @@ int main(int argc, char *argv[]) {
         });
         QObject::connect(socket, &QTcpSocket::disconnected, socket, &QTcpSocket::deleteLater);
     });
-
     return a.exec();
 }
