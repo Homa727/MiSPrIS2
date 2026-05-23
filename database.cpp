@@ -696,6 +696,7 @@ QVector<OperationClass>Database::getOperationClasses(){
     query.exec();
     while(query.next()){
         OperationClass op;
+        op.id=query.value("id").toInt();
         op.name=query.value("name").toString();
         op.description=query.value("description").toString();
         result.push_back(op);
@@ -710,6 +711,7 @@ QVector<OperationTemplate>Database::getOperationTemplates(int classID){
     query.exec();
     while(query.next()){
         OperationTemplate op;
+        op.id=query.value("id").toInt();
         op.classID=query.value("classID").toInt();
         op.name=query.value("name").toString();
         op.description=query.value("description").toString();
@@ -724,6 +726,7 @@ QVector<Operation>Database::getOperations(){
     query.exec();
     while(query.next()){
         Operation op;
+        op.id=query.value("id").toInt();
         op.templateID=query.value("templateID").toInt();
         op.operationDate=query.value("operationDate").toString();
         op.status=query.value("status").toString();
@@ -739,6 +742,7 @@ QVector<OperationRole>Database::getOperationRoles(int operationID){
     query.exec();
     while(query.next()){
         OperationRole op;
+        op.id=query.value("id").toInt();
         op.operationID=query.value("operationID").toInt();
         op.participantName=query.value("participantName").toString();
         op.roleName=query.value("roleName").toString();
@@ -754,6 +758,7 @@ QVector<OperationDocument>Database::getOperationDocuments(int operationID){
     query.exec();
     while(query.next()){
        OperationDocument op;
+       op.id=query.value("id").toInt();
        op.operationID=query.value("operationID").toInt();
        op.documentDate=query.value("documentDate").toString();
        op.documentNumber=query.value("documentNumber").toString();
@@ -770,6 +775,7 @@ QVector<OperationParameterValue>Database::getOperationParameters(int operationID
     query.exec();
     while(query.next()){
         OperationParameterValue op;
+        op.id=query.value("id").toInt();
         op.operationID=query.value("operationID").toInt();
         op.parameterID=query.value("parameterID").toInt();
         op.stringValue=query.value("stringValue").toString();
