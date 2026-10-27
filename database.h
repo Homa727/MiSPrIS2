@@ -8,6 +8,7 @@
 #include <QMap>
 #include <QDebug>
 #include <QJsonArray>
+#include <QDateTime>
 
 struct Unit{
     int id;
@@ -68,53 +69,35 @@ struct ProductParametrValue{
     int parameterID;
     double valueNumber;
     double EnumValueID;
+    QString paramName;   // добавлено для вывода имени параметра
 };
-struct OperationClass{
+
+struct ProductChange{
     int id;
-    QString name;
-    QString description;
+    int productID;
+    QDateTime changeDate;
+    QString changeDescription;
+    QString changeType;
 };
 
-struct OperationTemplate{
+struct BOM{
     int id;
-    int classID;
-    QString name;
-    QString description;
+    int parentID;
+    int componentID;
+    double quantity;
+    double for_quantity;
+    bool isBase;
+    int unitID;
+    int level;
+    double cumQuantity;
 };
 
-struct Operation{
-    int id;
-    int templateID;
-    QString operationDate;
-    QString status;
+struct CalcResult {
+    int materialClassID;
+    QString className;
+    QString unitShortName;
+    double totalQuantity;
 };
-
-struct OperationRole{
-    int id;
-    int operationID;
-    QString roleName;
-    QString participantName;
-};
-
-struct OperationDocument{
-    int id;
-    int operationID;
-    QString documentType;
-    QString documentNumber;
-    QString documentDate;
-};
-
-struct OperationParameterValue{
-    int id;
-    int operationID;
-    int parameterID;
-
-    double numberValue;
-    int enumValueID;
-
-    QString stringValue;
-};
-
 
 class Database : public QObject
 {
@@ -167,50 +150,23 @@ public:
     QVector<Product> findProductByEnumParam(int parametrID, int enumValueID, int classId = 0);
     QVector<Product> findProductByPrice(double min, double max, int classId = 0);
 
-    // Многопараметрический поиск (поддерживает пустой массив условий)
+    // Многопараметрический поиск
     QVector<Product> multiSearch(int classId, const QJsonArray &conditions);
+    bool addBOMPosition(int parentID, int componentID, double quantity,
+                        double forQuantity, bool isBase, int unitID);
+    bool updateBOMPosition(int bomID, double quantity, double forQuantity, bool isBase);
+    bool deleteBOMPosition(int bomID);
+    QVector<BOM> getBOM(int parentID);
+    QVector<BOM> findFullBOM(int productID);
+    QVector<CalcResult>  calcBOM(int productID, double qty);
+    bool checkBOMCycle(int parentID, int componentID);
 
-    bool addOperationClass(
-        const OperationClass &cls);
-
-    bool addOperationTemplate(
-        const OperationTemplate &templ);
-
-    bool createOperation(
-        const Operation &op);
-
-    bool addOperationRole(
-        const OperationRole &role);
-
-    bool addOperationDocument(
-        const OperationDocument &doc);
-
-    bool setOperationNumberParam(
-        int operationID,
-        int parameterID,
-        double value);
-
-    bool setOperationEnumParam(
-        int operationID,
-        int parameterID,
-        int enumValueID);
-
-    QVector<OperationClass> getOperationClasses();
-
-    QVector<OperationTemplate> getOperationTemplates(
-        int classID);
-
-    QVector<Operation> getOperations();
-
-    QVector<OperationRole> getOperationRoles(
-        int operationID);
-
-    QVector<OperationDocument> getOperationDocuments(
-        int operationID);
-
-    QVector<OperationParameterValue>
-    getOperationParameters(
-        int operationID);
+    // Модификации и изменения
+    bool createModification(int baseProductID, const QString &name,
+                            const QString &article, double price,
+                            const QString &manufacturer, int &newProductID);
+    bool registerChange(int productID, const QString &type, const QString &description);
+    QVector<ProductChange> getProductHistory(int productID);
 
 private:
     QSqlDatabase database;
