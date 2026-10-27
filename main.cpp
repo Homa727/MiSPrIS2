@@ -62,11 +62,12 @@ QJsonObject ProductclassParametrToJson(const ProductparametrClass &par){
 
 QJsonObject ProductParameterValueToJson(const ProductParametrValue &par){
     QJsonObject obj;
-    obj["id"]=par.id;
-    obj["productID"]=par.productID;
-    obj["parameterID"]=par.parameterID;
-    obj["valueNumber"]=par.valueNumber;
-    obj["valueEnumID"]=par.EnumValueID;
+    obj["id"] = par.id;
+    obj["productID"] = par.productID;
+    obj["parameterID"] = par.parameterID;
+    obj["valueNumber"] = par.valueNumber;
+    obj["valueEnumID"] = par.EnumValueID;
+    obj["paramName"] = par.paramName;   // добавлено
     return obj;
 }
 
@@ -92,56 +93,39 @@ QJsonObject TovarToJson(const Product &pro){
     obj["productclassID"]=pro.productclassID;
     return obj;
 }
-QJsonObject OperationClassToJson(const OperationClass &op){
+QJsonObject BOMToJson(const BOM &b) {
     QJsonObject obj;
-    obj["id"]=op.id;
-    obj["name"]=op.name;
-    obj["description"]=op.description;
+    obj["id"]           = b.id;
+    obj["parentID"]     = b.parentID;
+    obj["componentID"]  = b.componentID;
+    obj["quantity"]     = b.quantity;
+    obj["forQuantity"]  = b.for_quantity;
+    obj["isBase"]       = b.isBase;
+    obj["unitID"]       = b.unitID;
+    obj["level"]        = b.level;
+    obj["cumQuantity"]  = b.cumQuantity;
     return obj;
 }
-QJsonObject OperationTemplateToJson(const OperationTemplate &tem){
+
+QJsonObject CalcResultToJson(const CalcResult &r) {
     QJsonObject obj;
-    obj["id"]=tem.id;
-    obj["name"]=tem.name;
-    obj["classID"]=tem.classID;
-    obj["description"]=tem.description;
+    obj["classId"]   = r.materialClassID;
+    obj["className"] = r.className;
+    obj["unit"]      = r.unitShortName;
+    obj["total"]     = r.totalQuantity;
     return obj;
 }
-QJsonObject OperationToJson(const Operation &op){
+
+QJsonObject ProductChangeToJson(const ProductChange &c) {
     QJsonObject obj;
-    obj["id"]=op.id;
-    obj["templateID"]=op.templateID;
-    obj["operationDate"]=op.operationDate;
-    obj["status"]=op.status;
+    obj["id"]                = c.id;
+    obj["productID"]         = c.productID;
+    obj["changeDate"]        = c.changeDate.toString(Qt::ISODate);  // QDateTime → строка
+    obj["changeType"]        = c.changeType;
+    obj["changeDescription"] = c.changeDescription;
     return obj;
 }
-QJsonObject OperationRoleToJson(const OperationRole &rol){
-    QJsonObject obj;
-    obj["id"]=rol.id;
-    obj["operationID"]=rol.operationID;
-    obj["participantName"]=rol.participantName;
-    obj["roleName"]=rol.roleName;
-    return obj;
-}
-QJsonObject OperationDocumentToJson(const OperationDocument &doc){
-    QJsonObject obj;
-    obj["id"]=doc.id;
-    obj["operationID"]=doc.operationID;
-    obj["documentType"]=doc.documentType;
-    obj["documentNumber"]=doc.documentNumber;
-    obj["documentDate"]=doc.documentDate;
-    return obj;
-}
-QJsonObject OperationParameterValueToJson(const OperationParameterValue &par){
-    QJsonObject obj;
-    obj["id"]=par.id;
-    obj["numberValue"]=par.numberValue;
-    obj["operationID"]=par.operationID;
-    obj["parameterID"]=par.parameterID;
-    obj["enumValueID"]=par.enumValueID;
-    obj["stringValue"]=par.stringValue;
-    return obj;
-}
+
 
 void sendHttpResponse(QTcpSocket *socket, int statusCode, const QString &statusText,
                       const QString &contentType, const QByteArray &body) {
@@ -231,7 +215,7 @@ bool parseJsonBody(const QByteArray &body, QJsonObject &obj, QString &errorMsg) 
 }
 
 void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
-    // Раздача статики веб-интерфейса (если нужен)
+    // Раздача статики (если нужна)
     if (req.method == "GET" && (req.path == "/" || req.path == "/index.html")) {
         sendFileResponse(socket, "web/index.html");
         return;
@@ -600,7 +584,7 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
         return;
     }
 
-    // === Поиск (старые эндпоинты, совместимость) ===
+    // === Поиск (старые эндпоинты для совместимости) ===
     if(req.method=="GET" && req.path == "/api/classes/findnum"){
         if(!req.queryParams.contains("parameterID") || !req.queryParams.contains("minValue") || !req.queryParams.contains("maxValue")){
             sendErrorResponse(socket, "Missing parameters for search");
@@ -645,7 +629,7 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
         return;
     }
 
-    // === Новый многопараметрический поиск ===
+    // === Многопараметрический поиск ===
     if (req.method == "POST" && req.path == "/api/classes/multisearch") {
         QJsonObject body;
         QString err;
@@ -655,8 +639,8 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
         }
         int classId = body["classId"].toInt();
         QJsonArray conditions = body["conditions"].toArray();
-        if (classId == 0 || conditions.isEmpty()) {
-            sendErrorResponse(socket, "Invalid request: classId and conditions required");
+        if (classId == 0) {
+            sendErrorResponse(socket, "classId required");
             return;
         }
         QVector<Product> products = g_db->multiSearch(classId, conditions);
@@ -707,198 +691,90 @@ void handleRequest(QTcpSocket *socket, const HttpRequest &req) {
         sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status", "deleted"}}));
         return;
     }
-    if (req.method == "POST" && req.path == "/api/classes/multisearch") {
-        QJsonObject body;
-        QString err;
-        if (!parseJsonBody(req.body, body, err)) {
-            sendErrorResponse(socket, err);
-            return;
-        }
-        int classId = body["classId"].toInt();
-        QJsonArray conditions = body["conditions"].toArray();
-        if (classId == 0) {
-            sendErrorResponse(socket, "classId required");
-            return;
-        }
-        QVector<Product> products = g_db->multiSearch(classId, conditions);
+    // === BOM ===
+    if (req.method == "GET" && req.path == "/api/bom") {
+        int id = req.queryParams["id"].toInt();
         QJsonArray arr;
-        for (const auto &p : products) arr.append(TovarToJson(p));
+        for (const auto &b : g_db->getBOM(id)) arr.append(BOMToJson(b));
         sendJsonResponse(socket, QJsonDocument(arr));
         return;
     }
-    if(req.method=="GET" && req.path=="/api/classes/OperationClasses"){
-        QVector<OperationClass> operationClass = g_db->getOperationClasses();
+    if (req.method == "GET" && req.path == "/api/bom/full") {
+        int id = req.queryParams["id"].toInt();
         QJsonArray arr;
-        for(const auto &c: operationClass) arr.append(OperationClassToJson(c));
+        for (const auto &b : g_db->findFullBOM(id)) arr.append(BOMToJson(b));
         sendJsonResponse(socket, QJsonDocument(arr));
         return;
     }
-    if(req.method=="GET" && req.path=="/api/classes/OperationTemplates"){
-        int classID=req.queryParams["classID"].toInt();
-        QVector<OperationTemplate> OperationTemplates = g_db->getOperationTemplates(classID);
+    if (req.method == "GET" && req.path == "/api/bom/calc") {
+        int id = req.queryParams["id"].toInt();
+        double qty = req.queryParams.value("qty", "1").toDouble();
         QJsonArray arr;
-        for(const auto &c: OperationTemplates) arr.append(OperationTemplateToJson(c));
+        for (const auto &r : g_db->calcBOM(id, qty)) arr.append(CalcResultToJson(r));
         sendJsonResponse(socket, QJsonDocument(arr));
         return;
     }
-    if(req.method=="GET" && req.path=="/api/classes/Operations"){
-        QVector<Operation> Operations = g_db->getOperations();
-        QJsonArray arr;
-        for(const auto &c: Operations) arr.append(OperationToJson(c));
-        sendJsonResponse(socket, QJsonDocument(arr));
+    if (req.method == "POST" && req.path == "/api/bom") {
+        QJsonObject obj; QString err;
+        if (!parseJsonBody(req.body, obj, err)) { sendErrorResponse(socket, err); return; }
+        bool ok = g_db->addBOMPosition(
+            obj["parentID"].toInt(),
+            obj["componentID"].toInt(),
+            obj["quantity"].toDouble(),
+            obj["forQuantity"].toDouble(),
+            obj["isBase"].toBool(),
+            obj["unitID"].toInt());
+        if (ok) sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","ok"}}));
+        else    sendErrorResponse(socket, "BOM add failed (cycle?)", 500);
         return;
     }
-    if(req.method=="GET" && req.path=="/api/classes/OperationRoles"){
-        int operationID=req.queryParams["operationID"].toInt();
-        QVector<OperationRole> OperationRoles = g_db->getOperationRoles(operationID);
-        QJsonArray arr;
-        for(const auto &c: OperationRoles) arr.append(OperationRoleToJson(c));
-        sendJsonResponse(socket, QJsonDocument(arr));
+    if (req.method == "PUT" && req.path == "/api/bom") {
+        QJsonObject obj; QString err;
+        if (!parseJsonBody(req.body, obj, err)) { sendErrorResponse(socket, err); return; }
+        bool ok = g_db->updateBOMPosition(
+            obj["id"].toInt(),
+            obj["quantity"].toDouble(),
+            obj["forQuantity"].toDouble(),
+            obj["isBase"].toBool());
+        if (ok) sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","updated"}}));
+        else    sendErrorResponse(socket, "BOM update failed", 500);
         return;
     }
-    if(req.method=="GET" && req.path=="/api/classes/OperationDocuments"){
-        int operationID=req.queryParams["operationID"].toInt();
-        QVector<OperationDocument> OperationDocuments = g_db->getOperationDocuments(operationID);
-        QJsonArray arr;
-        for(const auto &c: OperationDocuments) arr.append(OperationDocumentToJson(c));
-        sendJsonResponse(socket, QJsonDocument(arr));
-        return;
-    }
-    if(req.method=="GET" && req.path=="/api/classes/OperationParameters"){
-        int operationID=req.queryParams["operationID"].toInt();
-        QVector<OperationParameterValue> OperationParameters = g_db->getOperationParameters(operationID);
-        QJsonArray arr;
-        for(const auto &c: OperationParameters) arr.append(OperationParameterValueToJson(c));
-        sendJsonResponse(socket, QJsonDocument(arr));
-        return;
-    }
-    if(req.method=="PUT" && req.path=="/api/classes/OperationEnumParam"){
-        QJsonObject obj;
-        QString errMsg;
-        if (!parseJsonBody(req.body, obj, errMsg)) {
-            sendErrorResponse(socket, errMsg);
-            return;
-        }
-        int productID=obj["productID"].toInt();
-        int parametrID = obj["parametrID"].toInt();
-        int enumValueID = obj["enumValueID"].toInt();
-        if (g_db->setEnumParametrValue(productID,parametrID,enumValueID))
-            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status", "base unit set"}}));
+    if (req.method == "DELETE" && req.path == "/api/bom") {
+        int id = req.queryParams["id"].toInt();
+        if (g_db->deleteBOMPosition(id))
+            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","deleted"}}));
         else
-            sendErrorResponse(socket, "Set base unit failed", 500);
+            sendErrorResponse(socket, "BOM delete failed", 500);
         return;
     }
-    if(req.method=="PUT" && req.path=="/api/classes/OperationNumberParam"){
-        QJsonObject obj;
-        QString errMsg;
-        if (!parseJsonBody(req.body, obj, errMsg)) {
-            sendErrorResponse(socket, errMsg);
-            return;
-        }
-        int operationID = obj["operationID"].toInt();
-        int parameterID = obj["parameterID"].toInt();
-        double value = obj["numberValue"].toDouble();
-        if (g_db->setOperationNumberParam(operationID, parameterID, value))
-            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status", "base unit set"}}));
+
+    // === Модификации и история ===
+    if (req.method == "POST" && req.path == "/api/products/modification") {
+        QJsonObject obj; QString err;
+        if (!parseJsonBody(req.body, obj, err)) { sendErrorResponse(socket, err); return; }
+        int newId = 0;
+        bool ok = g_db->createModification(
+            obj["baseProductID"].toInt(),
+            obj["name"].toString(),
+            obj["article"].toString(),
+            obj["price"].toDouble(),
+            obj["manufacturer"].toString(),
+            newId);
+        if (ok)
+            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","created"},{"id",newId}}));
         else
-            sendErrorResponse(socket, "Set base unit failed", 500);
+            sendErrorResponse(socket, "Modification create failed", 500);
         return;
     }
-    if(req.method=="POST" && req.path=="/api/classes/OperationClass"){
-        QJsonObject obj;
-        QString err;
-        if(!parseJsonBody(req.body,obj,err)){
-            sendErrorResponse(socket,err);
-            return;
-        }
-        OperationClass operc;
-        operc.id=obj["id"].toInt();
-        operc.name=obj["name"].toString();
-        operc.description=obj["description"].toString();
-        if(g_db->addOperationClass(operc)){
-            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","Operation class add"}}));
-        }else{
-            sendErrorResponse(socket,"peration class don`t add",500);
-        }
+    if (req.method == "GET" && req.path == "/api/products/history") {
+        int id = req.queryParams["id"].toInt();
+        QJsonArray arr;
+        for (const auto &c : g_db->getProductHistory(id)) arr.append(ProductChangeToJson(c));
+        sendJsonResponse(socket, QJsonDocument(arr));
         return;
     }
-    if(req.method=="POST" && req.path=="/api/classes/OperationDocument"){
-        QJsonObject obj;
-        QString err;
-        if(!parseJsonBody(req.body,obj,err)){
-            sendErrorResponse(socket,err);
-            return;
-        }
-        OperationDocument doc;
-        doc.id=obj["id"].toInt();
-        doc.operationID=obj["operationID"].toInt();
-        doc.documentType=obj["documentType"].toString();
-        doc.documentNumber=obj["documentNumber"].toString();
-        doc.documentDate=obj["documentDate"].toString();
-        if(g_db->addOperationDocument(doc)){
-            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","Document add"}}));
-        }else{
-            sendErrorResponse(socket,"Document don`t add",500);
-        }
-        return;
-    }
-    if(req.method=="POST" && req.path=="/api/classes/OperationRole"){
-        QJsonObject obj;
-        QString err;
-        if(!parseJsonBody(req.body,obj,err)){
-            sendErrorResponse(socket,err);
-            return;
-        }
-        OperationRole rol;
-        rol.id=obj["id"].toInt();
-        rol.operationID=obj["operationID"].toInt();
-        rol.participantName=obj["participantName"].toString();
-        rol.roleName=obj["roleName"].toString();
-        if(g_db->addOperationRole(rol)){
-            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","Role add"}}));
-        }else{
-            sendErrorResponse(socket,"Role don`t add",500);
-        }
-        return;
-    }
-    if(req.method=="POST" && req.path=="/api/classes/OperationTemplate"){
-        QJsonObject obj;
-        QString err;
-        if(!parseJsonBody(req.body,obj,err)){
-            sendErrorResponse(socket,err);
-            return;
-        }
-        OperationTemplate tem;
-        tem.id=obj["id"].toInt();
-        tem.classID=obj["classID"].toInt();
-        tem.name=obj["name"].toString();
-        tem.description=obj["description"].toString();
-        if(g_db->addOperationTemplate(tem)){
-            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","Template add"}}));
-        }else{
-            sendErrorResponse(socket,"Template don`t add",500);
-        }
-        return;
-    }
-    if(req.method=="POST" && req.path=="/api/classes/createOperation"){
-        QJsonObject obj;
-        QString err;
-        if(!parseJsonBody(req.body,obj,err)){
-            sendErrorResponse(socket,err);
-            return;
-        }
-        Operation op;
-        op.id=obj["id"].toInt();
-        op.operationDate=obj["operationDate"].toString();
-        op.status=obj["status"].toString();
-        op.templateID=obj["templateID"].toInt();
-        if(g_db->createOperation(op)){
-            sendJsonResponse(socket, QJsonDocument(QJsonObject{{"status","Operation add"}}));
-        }else{
-            sendErrorResponse(socket,"Operation don`t add",500);
-        }
-        return;
-    }
+
     sendErrorResponse(socket, "Not found", 404);
 }
 
