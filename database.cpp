@@ -1,3 +1,7 @@
+#include <QSqlDatabase>
+#include <QSqlError>
+#include <QSqlQuery>
+#include <QSqlRecord>
 #include <QDebug>
 #include <QDateTime>
 #include <QFile>
@@ -420,16 +424,22 @@ bool Database::setEnumParametrValue(int productID, int parametrID, double enumVa
 QVector<ProductParametrValue> Database::getProductParametrValue(int productID){
     QVector<ProductParametrValue> result;
     QSqlQuery query;
-    query.prepare("SELECT* FROM ProductParameterValue WHERE productID=:productID");
-    query.bindValue(":productID",productID);
-    query.exec();
+    query.prepare("SELECT ppv.*, p.name as paramName FROM ProductParameterValue ppv "
+                  "JOIN Parametr p ON ppv.parameterID = p.id "
+                  "WHERE ppv.productID = :productID");
+    query.bindValue(":productID", productID);
+    if (!query.exec()) {
+        qDebug() << query.lastError();
+        return result;
+    }
     while(query.next()){
         ProductParametrValue pro;
-        pro.id=query.value("id").toInt();
-        pro.productID=query.value("productID").toInt();
-        pro.parameterID=query.value("parameterID").toInt();
-        pro.valueNumber=query.value("valueNumber").toDouble();
-        pro.EnumValueID=query.value("valueEnumID").toInt();
+        pro.id = query.value("id").toInt();
+        pro.productID = query.value("productID").toInt();
+        pro.parameterID = query.value("parameterID").toInt();
+        pro.valueNumber = query.value("valueNumber").toDouble();
+        pro.EnumValueID = query.value("valueEnumID").toInt();
+        pro.paramName = query.value("paramName").toString();
         result.push_back(pro);
     }
     return result;
@@ -527,7 +537,7 @@ QVector<Product> Database::multiSearch(int classId, const QJsonArray &conditions
 {
     QVector<Product> result;
 
-    // Если массив условий пуст – возвращаем все товары выбранного класса
+    // Если нет условий, возвращаем все товары класса
     if (conditions.isEmpty()) {
         QSqlQuery query;
         query.prepare("SELECT * FROM tovar WHERE productClassID = :classId");
@@ -549,10 +559,11 @@ QVector<Product> Database::multiSearch(int classId, const QJsonArray &conditions
         return result;
     }
 
-    // Иначе строим сложный запрос с JOIN и WHERE
-    QString sql = "SELECT DISTINCT t.* FROM tovar t ";
+    // Строим сложный запрос
+    QString sql = "SELECT DISTINCT t.*";
     QStringList joins;
     QStringList whereClauses;
+    QVector<int> paramIds; // для возможного расширения
     int joinCounter = 0;
 
     whereClauses << "t.productClassID = :classId";
@@ -574,6 +585,7 @@ QVector<Product> Database::multiSearch(int classId, const QJsonArray &conditions
                          .arg(alias).arg(joinCounter);
             whereClauses << QString("%1.valueNumber BETWEEN :minVal_%2 AND :maxVal_%2")
                                 .arg(alias).arg(joinCounter);
+            paramIds.append(paramId);
         }
         else if (type == "enum") {
             int paramId = cond["paramId"].toInt();
@@ -583,11 +595,12 @@ QVector<Product> Database::multiSearch(int classId, const QJsonArray &conditions
                          .arg(alias).arg(joinCounter);
             whereClauses << QString("%1.valueEnumID = :enumValId_%2")
                                 .arg(alias).arg(joinCounter);
+            paramIds.append(paramId);
         }
         joinCounter++;
     }
 
-    sql += joins.join(" ");
+    sql += " FROM tovar t " + joins.join(" ");
     sql += " WHERE " + whereClauses.join(" AND ");
 
     QSqlQuery query;
@@ -631,157 +644,211 @@ QVector<Product> Database::multiSearch(int classId, const QJsonArray &conditions
     }
     return result;
 }
-bool Database::addOperationClass(const OperationClass &cls){
-    QSqlQuery query;
-    query.prepare("INSER INTO OperationClass(name,description) VALUES(:name,:description)");
-    query.bindValue(":name", cls.name);
-    query.bindValue(":name", cls.description);
-    return query.exec();
+bool Database::addBOMPosition(int parentID, int componentID, double quantity, double forQuantity, bool isBase, int unitID){
+    if (parentID == componentID) {
+        qDebug() << "BOM: изделие не может входить само в себя";
+        return false;
+    }
+    if (checkBOMCycle(parentID, componentID)) {
+        qDebug() << "BOM: добавление создаст цикл";
+        return false;
+    }
+    QSqlQuery q;
+    q.prepare("INSERT INTO BOM(parentID, componentID, quantity, forQuantity, isBase, unitID) "
+              "VALUES(:p, :c, :q, :fq, :ib, :u)");
+    q.bindValue(":p", parentID);
+    q.bindValue(":c", componentID);
+    q.bindValue(":q", quantity);
+    q.bindValue(":fq", forQuantity);
+    q.bindValue(":ib", isBase);
+    q.bindValue(":u", unitID);
+    if (!q.exec()){
+        qDebug() << q.lastError();
+        return false;
+    }
+    return true;
+}
+bool Database::updateBOMPosition(int bomID, double quantity, double forQuantity, bool isBase){
+    QSqlQuery q;
+    q.prepare("UPDATE BOM SET quantity=:q, forQuantity=:fq, isBase=:ib WHERE id=:id");
+    q.bindValue(":q", quantity);
+    q.bindValue(":fq", forQuantity);
+    q.bindValue(":ib", isBase);
+    q.bindValue(":id", bomID);
+    return q.exec();
+}
+bool Database::deleteBOMPosition(int bomID){
+    QSqlQuery q;
+    q.prepare("DELETE FROM BOM WHERE id=:id");
+    q.bindValue(":id", bomID);
+    return q.exec();
+}
+QVector<BOM> Database::getBOM(int parentID){
+    QVector<BOM> result;
+    QSqlQuery q;
+    q.prepare("SELECT * FROM BOM WHERE parentID = :p ORDER BY id");
+    q.bindValue(":p", parentID);
+    if (!q.exec()) { qDebug() << q.lastError(); return result; }
+    while (q.next()) {
+        BOM p;
+        p.id          = q.value("id").toInt();
+        p.parentID    = q.value("parentID").toInt();
+        p.componentID = q.value("componentID").toInt();
+        p.quantity    = q.value("quantity").toDouble();
+        p.for_quantity = q.value("forQuantity").toDouble();   // ← ваше поле
+        p.isBase      = q.value("isBase").toBool();
+        p.unitID      = q.value("unitID").toInt();
+        p.level       = 1;
+        p.cumQuantity = p.quantity / (p.for_quantity > 0 ? p.for_quantity : 1.0);
+        result.push_back(p);
+    }
+    return result;
+}
+QVector<BOM> Database::findFullBOM(int productID){
+    QVector<BOM> result;
+    QSqlQuery q;
+    q.prepare(
+        "WITH BOMTree AS ( "
+        "  SELECT b.id, b.parentID, b.componentID, b.quantity, b.forQuantity, "
+        "         b.isBase, b.unitID, "
+        "         CAST(b.quantity / NULLIF(b.forQuantity,0) AS DECIMAL(18,8)) AS cumQty, "
+        "         1 AS lvl "
+        "  FROM BOM b WHERE b.parentID = :pid "
+        "  UNION ALL "
+        "  SELECT b.id, b.parentID, b.componentID, b.quantity, b.forQuantity, "
+        "         b.isBase, b.unitID, "
+        "         CAST(bt.cumQty * b.quantity / NULLIF(b.forQuantity,0) AS DECIMAL(18,8)), "
+        "         bt.lvl + 1 "
+        "  FROM BOM b JOIN BOMTree bt ON b.parentID = bt.componentID ) "
+        "SELECT * FROM BOMTree ORDER BY lvl, id");
+    q.bindValue(":pid", productID);
+    if (!q.exec()) { qDebug() << q.lastError(); return result; }
+    while (q.next()) {
+        BOM p;
+        p.id          = q.value("id").toInt();
+        p.parentID    = q.value("parentID").toInt();
+        p.componentID = q.value("componentID").toInt();
+        p.quantity    = q.value("quantity").toDouble();
+        p.for_quantity = q.value("forQuantity").toDouble();
+        p.isBase      = q.value("isBase").toBool();
+        p.unitID      = q.value("unitID").toInt();
+        p.level       = q.value("lvl").toInt();
+        p.cumQuantity = q.value("cumQty").toDouble();
+        result.push_back(p);
+    }
+    return result;
+}
 
+QVector<CalcResult> Database::calcBOM(int productID, double qty){
+    QVector<CalcResult> result;
+    QSqlQuery q;
+    q.prepare(
+        "WITH BOMTree AS ( "
+        "  SELECT b.componentID, "
+        "         CAST(b.quantity / NULLIF(b.forQuantity,0) AS DECIMAL(18,8)) AS cumQty "
+        "  FROM BOM b WHERE b.parentID = :pid "
+        "  UNION ALL "
+        "  SELECT b.componentID, "
+        "         CAST(bt.cumQty * b.quantity / NULLIF(b.forQuantity,0) AS DECIMAL(18,8)) "
+        "  FROM BOM b JOIN BOMTree bt ON b.parentID = bt.componentID ) "
+        "SELECT t.productClassID, pc.imay AS className, u.shortName AS unitName, "
+        "       SUM(bt.cumQty) * :qty AS totalQty "
+        "FROM BOMTree bt "
+        "JOIN tovar t ON t.id = bt.componentID "
+        "JOIN ProductClass pc ON pc.id = t.productClassID "
+        "LEFT JOIN Units u ON u.id = pc.baseUnitID "
+        "WHERE pc.isTerminal = 1 "
+        "GROUP BY t.productClassID, pc.imay, u.shortName");
+    q.bindValue(":pid", productID);
+    q.bindValue(":qty", qty);
+    if (!q.exec()) { qDebug() << q.lastError(); return result; }
+    while (q.next()) {
+        CalcResult r;
+        r.materialClassID = q.value("productClassID").toInt();
+        r.className       = q.value("className").toString();
+        r.unitShortName   = q.value("unitName").toString();
+        r.totalQuantity   = q.value("totalQty").toDouble();
+        result.push_back(r);
+    }
+    return result;
 }
-bool Database::addOperationDocument(const OperationDocument &doc){
-    QSqlQuery query;
-    query.prepare("INSER INTO OperationDocument(operationID,documentType,documentNumber,documentDate) VALUES(:operationID,:documentType,:documentNumber,:documentDate)");
-    query.bindValue(":operationID", doc.operationID);
-    query.bindValue(":documentType", doc.documentType);
-    query.bindValue(":documentNumber", doc.documentNumber);
-    query.bindValue(":documentDate", doc.documentDate);
-    return query.exec();
+bool Database::checkBOMCycle(int parentID, int componentID){
+    QSqlQuery q;
+    q.prepare(
+        "WITH Tree AS ( "
+        "  SELECT componentID FROM BOM WHERE parentID = :comp "
+        "  UNION ALL "
+        "  SELECT b.componentID FROM BOM b JOIN Tree t ON b.parentID = t.componentID ) "
+        "SELECT 1 FROM Tree WHERE componentID = :parent");
+    q.bindValue(":comp", componentID);
+    q.bindValue(":parent", parentID);
+    if (!q.exec()) return true;   // ошибка → считаем циклом, безопаснее
+    return q.next();
+}
+// ==================== Модификации и изменения ====================
 
+bool Database::createModification(int baseProductID, const QString &name,
+                                  const QString &article, double price,
+                                  const QString &manufacturer, int &newProductID)
+{
+    QSqlQuery q;
+    q.prepare("SELECT productClassID FROM tovar WHERE id=:id");
+    q.bindValue(":id", baseProductID);
+    if (!q.exec() || !q.next()) return false;
+    int classID = q.value(0).toInt();
+
+    q.prepare("INSERT INTO tovar(imya, articleNumber, price, manufacture, "
+              "productClassID, baseProductID) "
+              "VALUES(:n, :a, :p, :m, :c, :b)");
+    q.bindValue(":n", name);
+    q.bindValue(":a", article);
+    q.bindValue(":p", price);
+    q.bindValue(":m", manufacturer);
+    q.bindValue(":c", classID);
+    q.bindValue(":b", baseProductID);
+    if (!q.exec()) { qDebug() << q.lastError(); return false; }
+    newProductID = q.lastInsertId().toInt();
+
+    // копируем базовую спецификацию
+    q.prepare("INSERT INTO BOM(parentID, componentID, quantity, forQuantity, isBase, unitID) "
+              "SELECT :new, componentID, quantity, forQuantity, 1, unitID "
+              "FROM BOM WHERE parentID = :base AND isBase = 1");
+    q.bindValue(":new", newProductID);
+    q.bindValue(":base", baseProductID);
+    q.exec();
+
+    registerChange(newProductID, "MODIFY",
+                   QString("Создана модификация на основе изделия %1").arg(baseProductID));
+    return true;
 }
-bool Database::addOperationRole(const OperationRole &role){
-    QSqlQuery query;
-    query.prepare("INSER INTO OperationRole(operationID,roleName,participantName) VALUES(:operationID,:roleName,:participantName)");
-    query.bindValue(":operationID", role.operationID);
-    query.bindValue(":documentNumber", role.roleName);
-    query.bindValue(":documentType", role.participantName);
-    return query.exec();
+
+bool Database::registerChange(int productID, const QString &type,
+                              const QString &description)
+{
+    QSqlQuery q;
+    q.prepare("INSERT INTO ProductChange(productID, changeType, changeDescription) "
+              "VALUES(:p, :t, :d)");
+    q.bindValue(":p", productID);
+    q.bindValue(":t", type);
+    q.bindValue(":d", description);
+    return q.exec();
 }
-bool Database::setOperationNumberParam(int operationID,int parameterID,double value){
-    QSqlQuery query;
-    query.prepare("UPDATE OperationParameterValue SET numberValue=:value WHERE operationID=:operationID AND parameterID=:parameterID");
-    query.bindValue(":value",value);
-    query.bindValue(":operationID",operationID);
-    query.bindValue(":parameterID",parameterID);
-    return query.exec();
-}
-bool Database::addOperationTemplate(const OperationTemplate &templ){
-    QSqlQuery query;
-    query.prepare("INSER INTO OperationTemplate(classID,name,description) VALUES(:classID,:name,:description)");
-    query.bindValue(":classID", templ.classID);
-    query.bindValue(":name", templ.name);
-    query.bindValue(":description", templ.description);
-    return query.exec();
-}
-bool Database::createOperation(const Operation &op){
-    QSqlQuery query;
-    query.prepare("INSERT INTO Operation(templateID,operationDate,status) VALUES(:templateID,:operationDate,:status)");
-    query.bindValue(":templateID", op.templateID);
-    query.bindValue(":operationDate", op.operationDate);
-    query.bindValue(":status", op.status);
-    return query.exec();
-}
-bool Database::setOperationEnumParam(int operationID, int parameterID, int enumValueID){
-    QSqlQuery query;
-    query.prepare("UPDATE OperationParameterValue SET enumValueID=:enumValueID WHERE operationID=:operationID AND parameterID=:parameterID");
-    query.bindValue(":enumValueID",enumValueID);
-    query.bindValue(":operationID",operationID);
-    query.bindValue(":parameterID",parameterID);
-    return query.exec();
-}
-QVector<OperationClass>Database::getOperationClasses(){
-    QVector<OperationClass> result;
-    QSqlQuery query;
-    query.prepare("SELECT * FROM OperationClass");
-    query.exec();
-    while(query.next()){
-        OperationClass op;
-        op.id=query.value("id").toInt();
-        op.name=query.value("name").toString();
-        op.description=query.value("description").toString();
-        result.push_back(op);
-    }
-    return result;
-}
-QVector<OperationTemplate>Database::getOperationTemplates(int classID){
-    QVector<OperationTemplate> result;
-    QSqlQuery query;
-    query.prepare("SELECT * FROM OperationTemplate WHERE classID=:classID");
-    query.bindValue(":classID",classID);
-    query.exec();
-    while(query.next()){
-        OperationTemplate op;
-        op.id=query.value("id").toInt();
-        op.classID=query.value("classID").toInt();
-        op.name=query.value("name").toString();
-        op.description=query.value("description").toString();
-        result.push_back(op);
-    }
-    return result;
-}
-QVector<Operation>Database::getOperations(){
-    QVector<Operation> result;
-    QSqlQuery query;
-    query.prepare("SELECT * FROM Operation");
-    query.exec();
-    while(query.next()){
-        Operation op;
-        op.id=query.value("id").toInt();
-        op.templateID=query.value("templateID").toInt();
-        op.operationDate=query.value("operationDate").toString();
-        op.status=query.value("status").toString();
-        result.push_back(op);
-    }
-    return result;
-}
-QVector<OperationRole>Database::getOperationRoles(int operationID){
-    QVector<OperationRole> result;
-    QSqlQuery query;
-    query.prepare("SELECT* FROM OperationRole WHERE operationID=:operationID");
-    query.bindValue(":operationID",operationID);
-    query.exec();
-    while(query.next()){
-        OperationRole op;
-        op.id=query.value("id").toInt();
-        op.operationID=query.value("operationID").toInt();
-        op.participantName=query.value("participantName").toString();
-        op.roleName=query.value("roleName").toString();
-        result.push_back(op);
-    }
-    return result;
-}
-QVector<OperationDocument>Database::getOperationDocuments(int operationID){
-    QVector<OperationDocument> result;
-    QSqlQuery query;
-    query.prepare("SELECT * FROM OperationDocument WHERE operationID=:operationID");
-    query.bindValue(":operationID",operationID);
-    query.exec();
-    while(query.next()){
-       OperationDocument op;
-       op.id=query.value("id").toInt();
-       op.operationID=query.value("operationID").toInt();
-       op.documentDate=query.value("documentDate").toString();
-       op.documentNumber=query.value("documentNumber").toString();
-       op.documentType=query.value("documentType").toString();
-       result.push_back(op);
-    }
-    return result;
-}
-QVector<OperationParameterValue>Database::getOperationParameters(int operationID){
-    QVector<OperationParameterValue> result;
-    QSqlQuery query;
-    query.prepare("SELECT * FROM OperationParameter WHERE operationID=:operationID");
-    query.bindValue(":operationID",operationID);
-    query.exec();
-    while(query.next()){
-        OperationParameterValue op;
-        op.id=query.value("id").toInt();
-        op.operationID=query.value("operationID").toInt();
-        op.parameterID=query.value("parameterID").toInt();
-        op.stringValue=query.value("stringValue").toString();
-        op.enumValueID=query.value("enumValueID").toInt();
-        op.numberValue=query.value("numberValue").toDouble();
-        result.push_back(op);
+
+QVector<ProductChange> Database::getProductHistory(int productID)
+{
+    QVector<ProductChange> result;
+    QSqlQuery q;
+    q.prepare("SELECT * FROM ProductChange WHERE productID=:p ORDER BY changeDate DESC");
+    q.bindValue(":p", productID);
+    q.exec();
+    while (q.next()) {
+        ProductChange c;
+        c.id                = q.value("id").toInt();
+        c.productID         = q.value("productID").toInt();
+        c.changeDate        = q.value("changeDate").toDateTime();  // ← QDateTime, как у вас
+        c.changeType        = q.value("changeType").toString();
+        c.changeDescription = q.value("changeDescription").toString();
+        result.push_back(c);
     }
     return result;
 }
